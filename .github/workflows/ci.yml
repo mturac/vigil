@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Start embedded PostgreSQL
+        run: |
+          nohup npx tsx scripts/devdb.ts --daemon > pg.log 2>&1 &
+          for i in $(seq 1 30); do
+            if node -e "const n=require('net');const s=n.connect(5433,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))"; then
+              echo "postgres is up"; break
+            fi
+            sleep 2
+          done
+      - run: npm run build
+      - run: npm test
+        env:
+          DATABASE_URL: postgresql://vigil:vigil@localhost:5433/vigil
+          LLM_PROVIDER: mock
