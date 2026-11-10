@@ -30,7 +30,7 @@ export function createGithubConnector(): Connector {
   return {
     id: 'github',
     label: 'GitHub',
-    capabilities: ['context', 'listOpenPrs', 'getPr', 'getPrFiles', 'commentPr', 'createPrReview', 'openPr', 'createBranch', 'updateFile', 'createFile', 'listIssues', 'getIssue', 'createIssue', 'commentIssue', 'getRepoContent', 'mergePr'],
+    capabilities: ['context', 'listOpenPrs', 'listPrs', 'getPr', 'getPrFiles', 'commentPr', 'createPrReview', 'openPr', 'createBranch', 'updateFile', 'createFile', 'listIssues', 'getIssue', 'createIssue', 'commentIssue', 'getRepoContent', 'mergePr'],
     isConfigured: () => !!token,
 
     async fetchContext(q: ConnectorQuery): Promise<ContextItem[]> {
@@ -73,6 +73,13 @@ export function createGithubConnector(): Connector {
         case 'listOpenPrs': {
           const repo = str(args, 'repo'); const [owner, r] = repo.split('/');
           const res = await wrap(ok.request('GET /repos/{owner}/{repo}/pulls', { owner, repo: r, state: 'open', sort: 'updated', direction: 'desc', per_page: 50 }));
+          return res.data;
+        }
+        case 'listPrs': {
+          const repo = str(args, 'repo'); const [owner, r] = repo.split('/');
+          const state = (typeof args.state === 'string' && ['open', 'closed', 'all'].includes(args.state) ? args.state : 'all') as 'open' | 'closed' | 'all';
+          const sort = (typeof args.sort === 'string' && ['updated', 'created', 'popularity', 'long-running'].includes(args.sort) ? args.sort : 'updated') as 'updated' | 'created' | 'popularity' | 'long-running';
+          const res = await wrap(ok.request('GET /repos/{owner}/{repo}/pulls', { owner, repo: r, state, sort, direction: 'desc', per_page: 50 }));
           return res.data;
         }
         case 'getPr': {

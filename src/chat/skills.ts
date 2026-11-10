@@ -41,6 +41,12 @@ export const SKILL_LIST: SkillDef[] = [
               const idleHours = Math.floor((Date.now() - new Date(pr.updated_at).getTime()) / 3600_000);
               if (idleHours >= 24) data.stale.push({ repo, number: pr.number, title: pr.title, idleHours, author: pr.user?.login });
             }
+            const closed = (await github.runAction('listPrs', { repo, state: 'closed' })) as { number: number; title: string; merged_at: string | null; user?: { login?: string } }[];
+            for (const pr of closed) {
+              if (pr.merged_at && new Date(pr.merged_at).getTime() >= since.getTime()) {
+                data.merges.push({ repo, title: pr.title, author: pr.user?.login ?? 'unknown', number: pr.number });
+              }
+            }
           } catch { /* repo inaccessible */ }
         }
       }
