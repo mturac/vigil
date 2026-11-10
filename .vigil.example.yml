@@ -1,0 +1,77 @@
+# Vigil repository configuration (commit this next to your code, like .coderabbit.yaml)
+version: 1
+
+review:
+  enabled: true
+  # post REQUEST_CHANGES review when findings at/above this severity exist
+  request_changes_at: critical
+  max_inline_comments: 25
+  # severity threshold for posting a finding at all
+  min_severity: info
+  paths:
+    ignore:
+      - "**/*.lock"
+      - "**/*.min.js"
+      - "dist/**"
+    only: []
+  tests:
+    # warn when source files change but no test files do
+    missing_test_warning: true
+  walkthrough:
+    mermaid_graph: true
+
+heuristics:
+  enabled: true
+  muted_rules: []       # e.g. [console-left]
+
+llm:
+  review: true          # deep LLM review layer on top of heuristics (needs LLM_* env)
+  ask: true
+  fix: true
+
+fix:
+  verify_command: "npm test"    # command run in sandbox to verify a fix
+  max_iterations: 3
+  branch_prefix: vigil/fix
+
+sandbox:
+  profile: local        # local | docker
+  workdir: .vigil-sandboxes
+  timeout_ms: 180000
+  network: false
+  allow: [node, npm, npx, pnpm, yarn, python3, pip, go, cargo, make, git, rg, ls, cat, echo, sh, bash, diff, grep, find, mkdir, cp, mv, touch, jest, vitest, tsc]
+  deny_patterns: ["rm -rf /", "sudo ", "shutdown", "reboot", ":(){:|:&};:", "curl ", "wget ", "nc ", "ssh "]
+  docker:
+    image: node:22-slim
+    network: none
+
+memory:
+  enabled: true
+  # auto-capture decisions from completed fix runs and resolved findings
+  auto_learn: true
+
+governance:
+  enabled: true
+  default_scope:
+    allowed_users: []          # empty = allowlist not enforced (manage scopes in DB)
+    allowed_repos: ["*"]
+    allowed_connectors: ["*"]
+    spend_limit_per_day_usd: 5.0
+
+automations:
+  standup:
+    enabled: false
+    cron: "0 9 * * 1-5"
+    channel: "console:default"
+  stale_prs:
+    enabled: true
+    cron: "0 * * * *"
+    idle_hours: 24
+    channel: "console:default"
+  pr_summary:
+    enabled: true
+    event: pr.opened
+    channel: "console:default"
+  sentry_signal:
+    enabled: false
+    channel: "console:default"

@@ -1,0 +1,277 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Severity {
+  critical
+  high
+  medium
+  low
+  info
+}
+
+enum JobStatus {
+  pending
+  running
+  done
+  failed
+  cancelled
+}
+
+enum RunStatus {
+  running
+  succeeded
+  failed
+  stopped
+}
+
+enum ConversationChannel {
+  github
+  slack
+  console
+  api
+}
+
+enum KnowledgeScope {
+  team
+  channel
+  thread
+}
+
+enum AutomationKind {
+  cron
+  signal
+  event
+}
+
+model Scope {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  description        String?
+  allowedUsers       String[] // external identities (github logins, slack ids); empty = no allowlist check
+  allowedRepos       String[] // "owner/name" glob patterns
+  allowedConnectors  String[] // connector ids or "*"
+  spendLimitPerDayUsd Float?
+  isDefault          Boolean  @default(false)
+  runs               Run[]
+  createdAt          DateTime @default(now())
+}
+
+model Repo {
+  id            String          @id @default(cuid())
+  provider      String // github | gitlab
+  externalId    String
+  owner         String
+  name          String
+  defaultBranch String?
+  pulls         Pull[]
+  fixRuns       FixRun[]
+  learnings     KnowledgeItem[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([provider, externalId])
+  @@index([owner, name])
+}
+
+model Pull {
+  id           String    @id @default(cuid())
+  repoId       String
+  repo         Repo      @relation(fields: [repoId], references: [id])
+  number       Int
+  title        String
+  author       String
+  state        String
+  headRef      String
+  baseRef      String
+  headSha      String
+  additions    Int       @default(0)
+  deletions    Int       @default(0)
+  changedFiles Int       @default(0)
+  reviews      Review[]
+  fixRuns      FixRun[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([repoId, number])
+}
+
+model Review {
+  id            String    @id @default(cuid())
+  pullId        String
+  pull          Pull      @relation(fields: [pullId], references: [id])
+  headSha       String
+  status        String // posted | dry-run | failed
+  summary       String    @db.Text
+  walkthrough   String?   @db.Text
+  riskScore     Int
+  llmUsed       Boolean   @default(false)
+  postedUrl     String?
+  findingsCount Int       @default(0)
+  criticalCount Int       @default(0)
+  highCount     Int       @default(0)
+  findings      Finding[]
+  createdAt     DateTime  @default(now())
+}
+
+model Finding {
+  id         String    @id @default(cuid())
+  reviewId   String
+  review     Review    @relation(fields: [reviewId], references: [id])
+  ruleId     String? // heuristic rule id or "llm:<slug>"
+  source     String // heuristic | llm
+  category   String
+  severity   Severity
+  confidence Int // 0..100
+  path       String
+  line       Int
+  message    String    @db.Text
+  suggestion String?   @db.Text
+  snippet    String?   @db.Text
+  resolvedAt DateTime?
+  mutedAt    DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([path, ruleId])
+  @@index([reviewId])
+}
+
+model FixRun {
+  id         String    @id @default(cuid())
+  repoId     String
+  repo       Repo      @relation(fields: [repoId], references: [id])
+  pullId     String?
+  pull       Pull?     @relation(fields: [pullId], references: [id])
+  origin     String    @db.Text // issue url / pr ref / finding id
+  branch     String
+  status     String // planning | patching | verifying | pushing | opened | failed | aborted
+  iterations Int       @default(0)
+  prUrl      String?
+  log        String?   @db.Text
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([repoId])
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  type        String
+  payload     Json
+  status      JobStatus @default(pending)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAt       DateTime  @default(now())
+  lockedAt    DateTime?
+  lockedBy    String?
+  lastError   String?   @db.Text
+  dedupeKey   String?   @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
+
+model Conversation {
+  id         String               @id @default(cuid())
+  channel    ConversationChannel
+  channelKey String // github:owner/repo#12 | slack:C0123 | console:default
+  title      String?
+  scopeId    String?
+  messages   ChatMessage[]
+  runs       Run[]
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  @@unique([channel, channelKey])
+}
+
+model ChatMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           String // user | assistant | system
+  authorId       String? // github login / slack user id / console user
+  body           String       @db.Text
+  runId          String?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model Run {
+  id               String        @id @default(cuid())
+  conversationId   String?
+  conversation     Conversation? @relation(fields: [conversationId], references: [id])
+  scopeId          String?
+  scope            Scope?        @relation(fields: [scopeId], references: [id])
+  kind             String // chat | review | fix | automation | signal
+  goal             String        @db.Text
+  status           RunStatus     @default(running)
+  channelKey       String?
+  userId           String?
+  promptTokens     Int           @default(0)
+  completionTokens Int           @default(0)
+  costUsd          Float         @default(0)
+  wallMs           Int           @default(0)
+  steps            RunStep[]
+  createdAt        DateTime      @default(now())
+  finishedAt       DateTime?
+
+  @@index([createdAt])
+  @@index([scopeId, createdAt])
+}
+
+model RunStep {
+  id         String   @id @default(cuid())
+  runId      String
+  run        Run      @relation(fields: [runId], references: [id])
+  seq        Int
+  kind       String // llm | tool | connector | sandbox
+  name       String
+  detail     Json?
+  ok         Boolean  @default(true)
+  tokensIn   Int      @default(0)
+  tokensOut  Int      @default(0)
+  costUsd    Float    @default(0)
+  durationMs Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([runId, seq])
+}
+
+model KnowledgeItem {
+  id          String         @id @default(cuid())
+  repoId      String?
+  repo        Repo?          @relation(fields: [repoId], references: [id])
+  scope       KnowledgeScope
+  scopeKey    String // team:global | channel:owner/repo | channel:slack:C123 | thread:<conversationId>
+  kind        String // fact | decision | runbook | preference | muted-rule
+  title       String
+  body        String         @db.Text
+  sourceRunId String?
+  pinned      Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([scope, scopeKey])
+}
+
+model Automation {
+  id         String        @id @default(cuid())
+  name       String        @unique
+  kind       AutomationKind
+  expr       String? // cron 5-field | signal type (sentry, datadog, ...) | event (pr.opened)
+  channelKey String? // destination conversation
+  prompt     String        @db.Text
+  skill      String? // built-in skill: standup | stale-prs | postmortem | debug
+  enabled    Boolean       @default(true)
+  lastRunAt  DateTime?
+  scopeId    String?
+  createdAt  DateTime      @default(now())
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.local
+pgdata/
+.pgdata/
+.secrets/
+.vigil-sandboxes/
+*.log
+.DS_Store
