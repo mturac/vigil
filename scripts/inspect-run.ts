@@ -13,4 +13,7 @@ const f = await db.finding.count();
 const rv = await db.review.count();
 const fs2 = await db.finding.groupBy({ by: ['path'], _count: true });
 console.log('DB totals: findings=' + f, 'reviews=' + rv, JSON.stringify(fs2));
+const latestReview = await db.review.findFirst({ orderBy: { createdAt: 'desc' }, select: { id: true } });
+const latestChatRun = await db.run.findFirst({ where: { kind: 'chat', status: 'succeeded' }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+console.log('LATEST_REVIEW=' + latestReview?.id, 'LATEST_CHAT_RUN=' + latestChatRun?.id);
 await db.$disconnect();
