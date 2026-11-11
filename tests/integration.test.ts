@@ -256,3 +256,35 @@ setInterval(() => { const i = buf.indexOf('\\n'); if (i >= 0) { handle(buf.slice
     expect(h.ok).toBe(true);
   }, 20000);
 });
+
+describe('standup repo resolution (REPOS env → DB fallback)', () => {
+  it('falls back to repos known from the Pull/Repo tables when REPOS is unset', async () => {
+    await db.repo.create({
+      data: {
+        provider: 'github', externalId: 'standup-fallback-test', owner: 'acme', name: 'known-repo',
+        pulls: { create: { number: 7, title: 'past reviewed PR', author: 'someone', state: 'open', headRef: 'b1', headSha: 'a'.repeat(40), baseRef: 'main', updatedAt: new Date() } },
+      },
+    });
+    const prev = process.env.REPOS;
+    delete process.env.REPOS;
+    try {
+      const { reposFromEnvOrDb } = await import('../src/chat/skills.js');
+      const repos = await reposFromEnvOrDb({ db, cfg: DEFAULT_CONFIG });
+      expect(repos).toContain('acme/known-repo');
+    } finally {
+      if (prev !== undefined) process.env.REPOS = prev;
+    }
+  });
+
+  it('REPOS env still wins over the database', async () => {
+    const prev = process.env.REPOS;
+    process.env.REPOS = 'env/first,env/second';
+    try {
+      const { reposFromEnvOrDb } = await import('../src/chat/skills.js');
+      const repos = await reposFromEnvOrDb({ db, cfg: DEFAULT_CONFIG });
+      expect(repos).toEqual(['env/first', 'env/second']);
+    } finally {
+      if (prev !== undefined) process.env.REPOS = prev; else delete process.env.REPOS;
+    }
+  });
+});
