@@ -1,6 +1,6 @@
 // Built-in skills: standup, stale-prs, postmortem, debug — the "Triggers &
 // Automations" and incident workflows, callable from chat and cron automations.
-import type { PrismaClient, Pull } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import type { VigilConfig } from '../core/config.js';
 import { llm, llmConfigured } from '../core/llm.js';
 import { buildStandupReport, buildPostmortem, type PostmortemInput } from '../analysis/report.js';
@@ -26,7 +26,7 @@ export const SKILL_LIST: SkillDef[] = [
     async run(ctx, args) {
       const sinceHours = typeof args.sinceHours === 'number' ? args.sinceHours : 24;
       const since = new Date(Date.now() - sinceHours * 3600_000);
-      const repos = (Array.isArray(args.repos) ? args.repos : typeof args.repos === 'string' ? [args.repos] : reposFromEnvOrDb(ctx)).filter(
+      const repos = ((Array.isArray(args.repos) ? args.repos : typeof args.repos === 'string' ? [args.repos] : await reposFromEnvOrDb(ctx)) as unknown[]).filter(
         (r: unknown): r is string => typeof r === 'string' && r.length > 0,
       );
 
@@ -73,7 +73,7 @@ export const SKILL_LIST: SkillDef[] = [
     description: 'Find pull requests idle for more than N hours. Args: {repos?: string[], idleHours?: number}',
     async run(ctx, args) {
       const idleHours = typeof args.idleHours === 'number' ? args.idleHours : 24;
-      const repos = (Array.isArray(args.repos) ? args.repos : typeof args.repos === 'string' ? [args.repos] : reposFromEnvOrDb(ctx)).filter(
+      const repos = ((Array.isArray(args.repos) ? args.repos : typeof args.repos === 'string' ? [args.repos] : await reposFromEnvOrDb(ctx)) as unknown[]).filter(
         (r: unknown): r is string => typeof r === 'string' && r.length > 0,
       );
       const github = buildRegistry().get('github')!;
@@ -226,8 +226,21 @@ function fallbackPostmortem(title: string, severity: string, context: string): P
   };
 }
 
-function reposFromEnvOrDb(ctx: SkillContext): string[] {
-  return reposFromEnv(ctx);
+export async function reposFromEnvOrDb(ctx: SkillContext): Promise<string[]> {
+  const fromEnv = reposFromEnv(ctx);
+  if (fromEnv.length > 0) return fromEnv;
+  // Fall back to repos Vigil already knows from past reviews (Pull table):
+  // most recently updated first, capped at 5 by the caller.
+  try {
+    const repos = await ctx.db.repo.findMany({
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+      select: { owner: true, name: true },
+    });
+    return repos.map((r) => `${r.owner}/${r.name}`);
+  } catch {
+    return [];
+  }
 }
 
 function reposFromEnv(ctx: { cfg: VigilConfig }): string[] {
