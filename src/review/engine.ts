@@ -199,6 +199,10 @@ export class ReviewEngine {
         const wantEvent = worst && SEV_THRESHOLD[worst] >= SEV_THRESHOLD[cfg.review.requestChangesAt] && cfg.review.requestChangesAt !== 'never'
           ? 'REQUEST_CHANGES'
           : 'COMMENT';
+        // Unique invisible stamp: GitHub 422-rejects a review whose body is byte-identical
+        // to a previously submitted one (same user, same commit). The stamp keeps
+        // re-reviews of the same head SHA idempotent without changing the visible report.
+        const stampedBody = `${report}\n<!-- vigil-review ${reviewRow.id} ${new Date().toISOString()} -->`;
         const inline = merged
           .filter((f) => f.source === 'heuristic' || f.line > 0)
           .slice(0, cfg.review.maxInlineComments)
@@ -211,14 +215,14 @@ export class ReviewEngine {
         let created: { html_url?: string };
         try {
           created = (await github.runAction('createPrReview', {
-            repo: req.repo, number: req.number, event, body: report, comments: inline,
+            repo: req.repo, number: req.number, event, body: stampedBody, comments: inline,
           })) as { html_url?: string };
         } catch (e) {
           // GitHub rejects REQUEST_CHANGES on the token owner's own PRs — fall back to COMMENT.
           if (event === 'REQUEST_CHANGES' && /own pull request/i.test((e as Error).message)) {
             event = 'COMMENT';
             created = (await github.runAction('createPrReview', {
-              repo: req.repo, number: req.number, event, body: report, comments: inline,
+              repo: req.repo, number: req.number, event, body: stampedBody, comments: inline,
             })) as { html_url?: string };
           } else {
             throw e;

@@ -138,3 +138,7 @@ Fixes landed as a result:
   fast with a clear message instead of a cryptic Prisma error.
 - **devdb.ts** ignores stray non-postgres `DATABASE_URL` values from the
   surrounding environment.
+- **Duplicate-review 422**: GitHub rejects a PR review whose body is byte-identical
+  to a previously submitted one (same token user, same head SHA); re-reviews after
+  a DB reset marked themselves `failed`. Review bodies now carry an invisible
+  per-run stamp (`<!-- vigil-review <id> <ts> -->`), verified live on PR #2.
