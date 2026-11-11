@@ -52,11 +52,16 @@ program
   .command('review <repo> <pr>')
   .description('Review a GitHub pull request (owner/name + PR number)')
   .option('--dry-run', 'Do not post anything to GitHub')
-  .action(async (repo: string, pr: string, opts: { dryRun?: boolean }) => {
+  .option('--force', 'Re-review even if this head SHA was already reviewed (posts a new review)')
+  .action(async (repo: string, pr: string, opts: { dryRun?: boolean; force?: boolean }) => {
     const db = getDb();
     try {
       const engine = new ReviewEngine(db, loadConfigFile('.vigil.yml'));
-      const res = await engine.review({ repo, number: parseInt(pr, 10), dryRun: opts.dryRun });
+      const res = await engine.review({ repo, number: parseInt(pr, 10), dryRun: opts.dryRun, force: opts.force });
+      if (res.skipped === 'already-reviewed') {
+        console.log(`Already reviewed this head SHA (review ${res.reviewId}) — nothing posted. Use --force to re-review.`);
+        return;
+      }
       console.log(res.report);
       console.log(`\n--- risk ${res.riskScore}/100 · ${res.findings.length} findings · llm=${res.llmUsed}${res.postedUrl ? ` · ${res.postedUrl}` : ''}`);
     } finally {

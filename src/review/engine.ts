@@ -3,9 +3,10 @@
 import type { PrismaClient } from '@prisma/client';
 import { buildDiffFile, buildDiffFiles, type RawFileEntry } from '../analysis/diff.js';
 import { runHeuristics } from '../analysis/heuristics.js';
+import { settleFindings } from '../analysis/anchor.js';
 import { buildReviewReport, buildWalkthrough } from '../analysis/report.js';
 import type { DiffFile, LlmFinding, MergedFinding, PullInfo, SimilarFinding } from '../analysis/types.js';
-import { isTestPath, riskScore, SEVERITY_ORDER, type Severity } from '../analysis/types.js';
+import { isTestPath, riskScore, type Severity } from '../analysis/types.js';
 import { pathIgnored, loadRepoConfig, type VigilConfig, DEFAULT_CONFIG } from '../core/config.js';
 import { llm, costOf, llmConfigured } from '../core/llm.js';
 import { Memory } from '../core/memory.js';
@@ -17,6 +18,8 @@ export interface ReviewRequest {
   repo: string; // owner/name
   number: number;
   dryRun?: boolean;
+  /** re-review even when this head SHA was already reviewed & posted */
+  force?: boolean;
   /** override where the diff comes from (tests / offline) */
   fakePull?: PullInfo;
   fakeFiles?: RawFileEntry[];
@@ -30,6 +33,8 @@ export interface ReviewResult {
   findings: MergedFinding[];
   report: string;
   llmUsed: boolean;
+  /** set when posting was skipped, with the reason */
+  skipped?: 'already-reviewed';
 }
 
 const SEV_THRESHOLD: Record<string, number> = { info: 1, low: 2, medium: 3, high: 4, critical: 5 };
@@ -77,6 +82,31 @@ export class ReviewEngine {
       rawFiles = (await github.runAction('getPrFiles', { repo: req.repo, number: req.number })) as unknown as RawFileEntry[];
     }
 
+    // ---- idempotency: never post twice for the same head SHA ----------------
+    if (!req.force && !req.fakePull) {
+      const [o, n] = req.repo.split('/');
+      const existing = await this.db.review.findFirst({
+        where: {
+          headSha: pull.headSha,
+          status: 'posted',
+          pull: { number: req.number, repo: { owner: o, name: n } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (existing) {
+        logger.info({ repo: req.repo, pr: req.number, headSha: pull.headSha }, 'already reviewed this head SHA — skipping (use --force to re-review)');
+        return {
+          reviewId: existing.id,
+          postedUrl: existing.postedUrl,
+          riskScore: existing.riskScore,
+          findings: [],
+          report: existing.summary,
+          llmUsed: existing.llmUsed,
+          skipped: 'already-reviewed',
+        };
+      }
+    }
+
     // ---- config: repo-local overrides via .vigil.yml at repo root ----------
     let cfg = this.baseConfig;
     if (canUseGithub) {
@@ -113,23 +143,9 @@ export class ReviewEngine {
       }
     }
 
-    // ---- merge -------------------------------------------------------------
-    const merged: MergedFinding[] = [
-      ...heuristicFindings.map((h) => ({
-        ruleId: h.ruleId, source: 'heuristic' as const, category: h.category, severity: h.severity,
-        confidence: h.confidence, path: h.path, line: h.line, message: h.message, suggestion: h.suggestion, snippet: h.snippet,
-      })),
-      ...llmFindings
-        .filter((f) => files.some((file) => file.path === f.path))
-        .map((f) => ({
-          ruleId: null, source: 'llm' as const,
-          category: (f.category ?? (['security', 'quality', 'performance', 'tests', 'maintainability', 'style'].includes(f.severity) ? 'quality' : 'quality')) as MergedFinding['category'],
-          severity: f.severity, confidence: Math.max(0, Math.min(100, f.confidence)), path: f.path, line: f.line,
-          message: `${f.title}: ${f.detail}`, suggestion: f.suggestion,
-        })),
-    ]
-      .filter((f) => SEV_THRESHOLD[f.severity] >= SEV_THRESHOLD[cfg.review.minSeverity])
-      .sort((a, b) => SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity] || b.confidence - a.confidence);
+    // ---- merge: anchor LLM findings, fold corroborations into rules -------
+    const merged: MergedFinding[] = settleFindings(heuristicFindings, llmFindings, files)
+      .filter((f) => SEV_THRESHOLD[f.severity] >= SEV_THRESHOLD[cfg.review.minSeverity]);
 
     const risk = riskScore(merged);
 
@@ -199,10 +215,10 @@ export class ReviewEngine {
         const wantEvent = worst && SEV_THRESHOLD[worst] >= SEV_THRESHOLD[cfg.review.requestChangesAt] && cfg.review.requestChangesAt !== 'never'
           ? 'REQUEST_CHANGES'
           : 'COMMENT';
-        // Unique invisible stamp: GitHub 422-rejects a review whose body is byte-identical
-        // to a previously submitted one (same user, same commit). The stamp keeps
-        // re-reviews of the same head SHA idempotent without changing the visible report.
-        const stampedBody = `${report}\n<!-- vigil-review ${reviewRow.id} ${new Date().toISOString()} -->`;
+        // Stable invisible stamp: keeps forced re-reviews of the same head SHA
+        // from tripping GitHub's byte-identical-body 422. The DB guard above is
+        // what actually prevents unwanted duplicates.
+        const stampedBody = `${report}\n<!-- vigil-review ${reviewRow.id} -->`;
         const inline = merged
           .filter((f) => f.source === 'heuristic' || f.line > 0)
           .slice(0, cfg.review.maxInlineComments)

@@ -83,7 +83,7 @@ export interface LlmFinding {
 /** Merged finding stored in DB and rendered in reports. */
 export interface MergedFinding {
   ruleId: string | null; // heuristic rule id, or null for pure-LLM findings
-  source: 'heuristic' | 'llm';
+  source: 'heuristic' | 'llm' | 'heuristic+llm'; // 'heuristic+llm' = rule found by both layers
   category: Category;
   severity: Severity;
   confidence: number;

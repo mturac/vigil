@@ -66,11 +66,20 @@
 
 - **Run/RunStep**: every LLM call and tool call with tokens, USD cost, duration —
   the "explainable, attributed" guarantee.
-- **Finding**: severity, confidence, rule id, source (heuristic/llm), snippet —
+- **Finding**: severity, confidence, rule id, source (heuristic/llm/heuristic+llm), snippet —
   powers similar-findings lookback and muting.
+- **Anchoring guarantee** (`src/analysis/anchor.ts`): LLM findings are never
+  trusted blindly. Each one must anchor to an actually-added diff line whose
+  content corroborates it; hallucinated line numbers are re-anchored by
+  content similarity or the finding is dropped. LLM findings that corroborate
+  a deterministic rule fold into it (`heuristic+llm`) instead of duplicating
+  it. Regression tests reproduce a real incident where the same finding came
+  back on lines 7/5/8 across three runs.
 - **KnowledgeItem**: scope (`team|channel|thread`) + scopeKey — the living memory.
 - **Scope**: user/repo/connector allowlists + daily USD spend limit.
 - **Job**: dedupeKey unique — webhook replay and cron double-fire are idempotent.
+- **Review idempotency**: a head SHA that was already reviewed & posted is
+  skipped on re-run (`--force` overrides) — no duplicate reviews.
 
 ## Design decisions
 
