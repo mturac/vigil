@@ -1,4 +1,5 @@
 // HTTP surface: dashboard (server-rendered), JSON APIs, GitHub + Slack webhooks.
+import './core/env.js'; // load .env before anything reads process.env
 import express, { type Request, type Response, type NextFunction } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { Queue } from './core/queue.js';

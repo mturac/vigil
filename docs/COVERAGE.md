@@ -111,3 +111,30 @@ what actually ships in this repository — nothing aspirational.
 4. **Roles UI** (primary user / admin / scope admin management screens) — scopes exist in the DB and are enforced, but there is no admin UI to edit them (SQL/CLI only today).
 5. **GitHub App flow** — Vigil authenticates as a token (PAT or GitHub App installation token supplied via env); the marketplace-style App install UX is not included.
 6. **Hosted multi-tenant SaaS** — single-tenant by design (self-hosted product).
+
+## Changelog 2026-11-11 (hardening pass after live demo)
+
+Live end-to-end demo executed against this very repository (PR mturac/vigil#1,
+opened with intentionally flawed code):
+
+- `vigil review mturac/vigil 1` posted a **real GitHub review** (risk 100/100,
+  14 inline comments, heuristics + LLM merged findings) — visible on the PR.
+- `vigil ask` ran the full agent tool-loop (github getPr/getPrFiles → review__pr)
+  with every step and USD cost attributed in the `Run`/`RunStep` tables.
+- Web console chat verified over HTTP (`POST /api/console/message`).
+
+Fixes landed as a result:
+
+- **LLM_HEADERS** env: JSON object of extra HTTP headers for OpenAI-compatible
+  gateways that require side-car auth (X-Token style gateways, Azure APIM,
+  corporate proxies). Unit-tested in `tests/llm.test.ts`.
+- **Price-table bug**: variant models resolved to the wrong price family
+  (`glm-4.5-flash` inherited `glm-4.5` pricing). Longest-match now wins.
+- **dashboard command** now constructs the ChatAgent — the web console
+  previously returned 503 in dashboard-only mode.
+- **.env loading**: `dotenv` was a declared dependency but never imported;
+  entrypoints (`index`, `server`, `daemon`) now load it (explicit env still wins).
+- **PostgreSQL-only guard**: a `DATABASE_URL` that is not `postgres://` fails
+  fast with a clear message instead of a cryptic Prisma error.
+- **devdb.ts** ignores stray non-postgres `DATABASE_URL` values from the
+  surrounding environment.

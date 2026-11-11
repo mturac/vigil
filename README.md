@@ -38,9 +38,12 @@ export DATABASE_URL=postgresql://vigil:vigil@localhost:5433/vigil
 # no LLM key? heuristics-only mode still reviews.
 GITHUB_TOKEN=ghp_xxx npx tsx src/index.ts review owner/repo 123
 
-# with any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, OpenRouter, DeepSeek, Groq, LM Studio...):
+# with any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, OpenRouter, DeepSeek, Groq, LM Studio, Z.ai...):
 LLM_PROVIDER=openai LLM_MODEL=gpt-4o OPENAI_API_KEY=sk-xxx npx tsx src/index.ts review owner/repo 123
 LLM_PROVIDER=openai OPENAI_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.1 npx tsx src/index.ts ask "summarize our open PRs"
+
+# gateways that need side-car auth headers next to the key (JSON object):
+LLM_HEADERS='{"X-Token":"<jwt>","X-Z-AI-From":"Z"}' LLM_MODEL=glm-4.6 npx tsx src/index.ts ask "hi"
 
 # or Anthropic:
 LLM_PROVIDER=anthropic LLM_MODEL=claude-3-5-sonnet-latest ANTHROPIC_API_KEY=sk-ant-xxx npx tsx src/index.ts serve

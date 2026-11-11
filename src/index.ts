@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Vigil CLI: serve (daemon), review, fix, ask, scan, config, memory, automations.
+import './core/env.js'; // load .env before anything reads process.env
 import { Command } from 'commander';
 import { PrismaClient } from '@prisma/client';
 import { startDaemon } from './daemon.js';
@@ -41,7 +42,8 @@ program
     const db = getDb();
     await ensureDefaultScope().catch(() => {});
     const queue = new Queue(db);
-    const app = buildApp({ db, queue });
+    const agent = new ChatAgent(db, loadConfigFile('.vigil.yml'));
+    const app = buildApp({ db, queue, agent });
     const port = parseInt(opts.port, 10);
     app.listen(port, () => console.log(`vigil dashboard on http://localhost:${port}`));
   });

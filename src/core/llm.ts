@@ -52,6 +52,14 @@ const PRICE_TABLE: Record<string, [number, number]> = {
   'claude-3-5-haiku-latest': [0.8, 4],
   'claude-3-opus-latest': [15, 75],
   'claude-3-haiku-20240307': [0.25, 1.25],
+  // Z.ai / Zhipu public list prices (USD per 1M tokens) — override via env for exact billing
+  'glm-4.6': [0.6, 2.2],
+  'glm-4.5': [0.6, 2.2],
+  'glm-4.5-air': [0.2, 1.1],
+  'glm-4.5-flash': [0, 0], // free tier
+  'gemma': [0, 0], // free community models (gemma-3-27b-it etc.)
+  'deepseek-chat': [0.27, 1.1],
+  'deepseek-reasoner': [0.55, 2.19],
 };
 
 export function priceFor(model: string): [number, number] {
@@ -59,10 +67,12 @@ export function priceFor(model: string): [number, number] {
   const pout = parseFloat(process.env.LLM_PRICE_OUT_PER_M ?? '');
   if (Number.isFinite(pin) && Number.isFinite(pout)) return [pin, pout];
   const m = model.toLowerCase();
-  for (const key of Object.keys(PRICE_TABLE)) {
-    if (m.includes(key)) return PRICE_TABLE[key];
-  }
-  return [3, 15]; // conservative default
+  // Longest matching key wins so versioned/variant models resolve to their
+  // own entry (glm-4.5-flash must not inherit glm-4.5 pricing).
+  const key = Object.keys(PRICE_TABLE)
+    .filter((k) => m.includes(k))
+    .sort((a, b) => b.length - a.length)[0];
+  return key ? PRICE_TABLE[key] : ([3, 15] as [number, number]); // conservative default
 }
 
 export function costOf(model: string, promptTokens: number, completionTokens: number): number {
@@ -76,6 +86,31 @@ export function llmConfigured(): boolean {
   if (provider === 'anthropic') return !!process.env.ANTHROPIC_API_KEY;
   if (provider === 'openai') return !!process.env.OPENAI_API_KEY || !!process.env.OPENAI_BASE_URL;
   return false;
+}
+
+/**
+ * Extra HTTP headers for the LLM endpoint, as a JSON object in LLM_HEADERS.
+ * Needed by gateways that require side-car auth headers alongside the API key
+ * (e.g. X-Token on some Z.ai gateway deployments, Azure apim subscription keys,
+ * corporate proxies). Invalid JSON is ignored with a warning at call time.
+ */
+export function llmExtraHeaders(): Record<string, string> {
+  const raw = process.env.LLM_HEADERS ?? '';
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'string') out[k] = v;
+      }
+      return out;
+    }
+  } catch {
+    // fall through
+  }
+  console.warn('vigil: LLM_HEADERS is set but is not a valid JSON object string; ignoring');
+  return {};
 }
 
 export class Llm {
@@ -95,11 +130,12 @@ export class Llm {
       this.openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY ?? 'missing',
         baseURL: process.env.OPENAI_BASE_URL || undefined,
+        defaultHeaders: llmExtraHeaders(),
         timeout: 120000,
         maxRetries: 2,
       });
     } else if (this.provider === 'anthropic') {
-      this.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? 'missing', timeout: 120000, maxRetries: 2 });
+      this.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? 'missing', defaultHeaders: llmExtraHeaders(), timeout: 120000, maxRetries: 2 });
     }
   }
 

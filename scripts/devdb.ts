@@ -11,7 +11,11 @@ const PASSWORD = 'vigil';
 const DB = 'vigil';
 
 function databaseUrl(): string {
-  return process.env.DATABASE_URL ?? `postgresql://${USER}:${PASSWORD}@localhost:${PORT}/${DB}`;
+  const raw = process.env.DATABASE_URL ?? '';
+  // Only accept PostgreSQL URLs — stray file:/sqlite URLs from the surrounding
+  // environment must never leak into this Postgres-only product.
+  if (raw.startsWith('postgres://') || raw.startsWith('postgresql://')) return raw;
+  return `postgresql://${USER}:${PASSWORD}@localhost:${PORT}/${DB}`;
 }
 
 async function main(): Promise<void> {

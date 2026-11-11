@@ -1,5 +1,6 @@
 // Daemon: durable queue workers + GitHub polling + cron automations.
 // This is the always-on "agent runtime" process.
+import './core/env.js'; // load .env before anything reads process.env
 import type { PrismaClient } from '@prisma/client';
 import { Queue } from './core/queue.js';
 import { db } from './core/db.js';
