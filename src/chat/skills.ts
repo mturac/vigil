@@ -1,6 +1,6 @@
 // Built-in skills: standup, stale-prs, postmortem, debug — the "Triggers &
 // Automations" and incident workflows, callable from chat and cron automations.
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Pull } from '@prisma/client';
 import type { VigilConfig } from '../core/config.js';
 import { llm, llmConfigured } from '../core/llm.js';
 import { buildStandupReport, buildPostmortem, type PostmortemInput } from '../analysis/report.js';
